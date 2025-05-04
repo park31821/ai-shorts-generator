@@ -2,6 +2,8 @@ from app.utils.sheets_utils import SheetsUtils, TopicData
 from app.core.openai_client import OpenAIClient
 from typing import Dict, Any
 import re
+from googleapiclient.errors import HttpError
+from openai import OpenAIError
 
 class ContentGenerator:
     """콘텐츠 생성을 관리하는 클래스"""
@@ -27,8 +29,16 @@ class ContentGenerator:
         return script.strip()
 
     def process_pending_topics(self) -> None:
-        """대기 중인 모든 주제를 처리하고 스크립트를 생성합니다."""
-        pending_topics = self.sheets_utils.get_pending_topics()
+        """대기 중인 모든 주제를 처리하고 스크립트를 생성합니다.
+
+        Raises:
+            ValueError: Google Sheets API 호출 실패 시
+            Exception: OpenAI API 호출 실패 시
+        """
+        try:
+            pending_topics = self.sheets_utils.get_pending_topics()
+        except HttpError as e:
+            raise ValueError(f"Failed to get pending topics: {str(e)}")
         
         for topic_data in pending_topics:
             try:
@@ -38,25 +48,34 @@ class ContentGenerator:
                     'content': '',  # Not needed for our current prompt
                     'tags': []  # Not needed for our current prompt
                 }
-                script = self.openai_client.generate_script(content_data)
+                try:
+                    script = self.openai_client.generate_script(content_data)
+                except OpenAIError as e:
+                    raise Exception(f"Failed to generate script: {str(e)}")
                 
                 # Remove section tags from the script
                 cleaned_script = self._remove_section_tags(script)
                 
                 # Update the spreadsheet
-                self.sheets_utils.update_row(topic_data, cleaned_script)
+                try:
+                    self.sheets_utils.update_row(topic_data, cleaned_script)
+                except HttpError as e:
+                    raise ValueError(f"Failed to update row: {str(e)}")
                 
             except Exception as e:
                 print(f"Error processing topic {topic_data.topic}: {str(e)}")
-                continue
+                raise
 
     def add_topic(self, topic: str) -> None:
         """새로운 주제를 스프레드시트에 추가합니다.
 
         Args:
             topic: 추가할 주제
+
+        Raises:
+            ValueError: Google Sheets API 호출 실패 시
         """
         try:
             self.sheets_utils.append_row(topic)
-        except Exception as e:
-            print(f"Error adding topic '{topic}': {str(e)}") 
+        except HttpError as e:
+            raise ValueError(f"Failed to append row: {str(e)}") 
