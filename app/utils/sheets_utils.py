@@ -20,7 +20,8 @@ class TopicData:
     voice: str
     video: str
     video_link: str
-    status: str
+    data_status: str  # Data 열의 값
+    status: str      # Status 열의 값
     column_indices: Dict[str, int]
 
 class SheetsUtils:
@@ -147,6 +148,7 @@ class SheetsUtils:
             for row_idx, row in enumerate(values[1:], start=2):
                 row_data = self._get_row_data(row, column_indices)
                 
+                # 스크립트 생성이 필요한 경우
                 if (not row_data['Data'] or row_data['Data'] == '❌') or \
                    (row_data['Data'] == '✅' and not row_data['Script']):
                     pending_topics.append(TopicData(
@@ -156,6 +158,20 @@ class SheetsUtils:
                         voice=row_data['Voice'],
                         video=row_data['Video'],
                         video_link=row_data['Video Link'],
+                        data_status=row_data['Data'],
+                        status=row_data['Status'],
+                        column_indices=column_indices
+                    ))
+                # 음성 생성이 필요한 경우
+                elif row_data['Script'] and row_data['Data'] == '✅' and not row_data['Voice']:
+                    pending_topics.append(TopicData(
+                        row=row_idx,
+                        topic=row_data['Topic'],
+                        script=row_data['Script'],
+                        voice=row_data['Voice'],
+                        video=row_data['Video'],
+                        video_link=row_data['Video Link'],
+                        data_status=row_data['Data'],
                         status=row_data['Status'],
                         column_indices=column_indices
                     ))
@@ -235,4 +251,74 @@ class SheetsUtils:
             ).execute()
             
         except HttpError as e:
-            raise ValueError(f"Failed to append row: {str(e)}") 
+            raise ValueError(f"Failed to append row: {str(e)}")
+
+    def update_voice_status(self, topic_data: TopicData, voice_status: str, status_message: str) -> None:
+        """음성 생성 상태를 업데이트합니다.
+
+        Args:
+            topic_data: 업데이트할 주제 데이터
+            voice_status: 음성 상태 (예: "✅")
+            status_message: 상태 메시지
+
+        Raises:
+            HttpError: API 호출에 실패한 경우
+        """
+        try:
+            # 현재 행 데이터 가져오기
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=f'{self.sheet_name}!A{topic_data.row}:G{topic_data.row}'
+            ).execute()
+            
+            values = result.get('values', [[]])[0]
+            current_row = values + [''] * (7 - len(values))  # A부터 G열까지
+            
+            # 데이터 업데이트
+            current_row[topic_data.column_indices['Voice']] = voice_status
+            current_row[topic_data.column_indices['Status']] = status_message
+            
+            # 스프레드시트 업데이트
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f'{self.sheet_name}!A{topic_data.row}:G{topic_data.row}',
+                valueInputOption='RAW',
+                body={'values': [current_row]}
+            ).execute()
+            
+        except HttpError as e:
+            raise ValueError(f"Failed to update voice status: {str(e)}")
+
+    def reset_voice_status(self, topic_data: TopicData) -> None:
+        """음성 생성 상태를 초기화합니다.
+
+        Args:
+            topic_data: 초기화할 주제 데이터
+
+        Raises:
+            HttpError: API 호출에 실패한 경우
+        """
+        try:
+            # 현재 행 데이터 가져오기
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=f'{self.sheet_name}!A{topic_data.row}:G{topic_data.row}'
+            ).execute()
+            
+            values = result.get('values', [[]])[0]
+            current_row = values + [''] * (7 - len(values))  # A부터 G열까지
+            
+            # 데이터 업데이트
+            current_row[topic_data.column_indices['Voice']] = ''
+            current_row[topic_data.column_indices['Status']] = "Voice generation pending"
+            
+            # 스프레드시트 업데이트
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=f'{self.sheet_name}!A{topic_data.row}:G{topic_data.row}',
+                valueInputOption='RAW',
+                body={'values': [current_row]}
+            ).execute()
+            
+        except HttpError as e:
+            raise ValueError(f"Failed to reset voice status: {str(e)}") 
